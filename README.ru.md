@@ -1,5 +1,8 @@
 # FixDrops
 
+Версия с графическим интерфейсом и RIFE:
+https://github.com/logego-dev/Video-Drop-Fix-Gui
+
 Выборочное восстановление пропущенных кадров по временным меткам видео.
 
 **[English version](README.md)**
