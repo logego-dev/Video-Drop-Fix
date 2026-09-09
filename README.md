@@ -1,5 +1,8 @@
 # FixDrops
 
+GUI+RIFE:
+https://github.com/logego-dev/Video-Drop-Fix-Gui
+
 Selective dropped-frame repair based on video timestamps.
 
 **[Русская версия](README.ru.md)**
