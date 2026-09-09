@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Editors
+.vscode/
+.idea/
+
+# Operating systems
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Media files
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.m4v
+*.nut
+*.wav
+*.pcm
+
+# Generated reports and diagnostics
+*.drops.json
+timing*.txt
+
+# Temporary processing directories
+fixdrops_*/
+
+# Local logs
+*.log
