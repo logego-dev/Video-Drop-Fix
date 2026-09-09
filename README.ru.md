@@ -1,411 +1,414 @@
 # FixDrops
 
-Selective dropped-frame repair based on video timestamps.
+Выборочное восстановление пропущенных кадров по временным меткам видео.
 
-**[Русская версия](README.ru.md)**
+**[English version](README.md)**
 
-FixDrops analyzes frame presentation timestamps (PTS), estimates the nominal frame rate, and maps existing images onto a constant-frame-rate timeline. It interpolates empty frame slots instead of interpolating the entire video.
+FixDrops анализирует PTS кадров, оценивает номинальную частоту съёмки и распределяет исходные изображения по постоянной кадровой сетке. Интерполируются пустые позиции, а не весь видеоряд.
 
-The script targets the original video timing and copies audio directly from the source without re-encoding. It compensates for intermediate-file timestamp offsets and checks the first output video timestamp after muxing.
+Скрипт ориентируется на исходную временную ось и копирует звук непосредственно из исходника без перекодирования. Перед сборкой компенсируется сдвиг промежуточного видео, после сборки проверяется начало выходного видеопотока.
 
-> **Status:** Experimental. Test short clips and verify synchronization before using the output for multicamera editing or other timing-critical work.
+> **Статус:** экспериментальный инструмент. Перед обработкой длинных записей проверь короткий клип и синхронизацию, особенно для мультикамерного монтажа.
 
-## Features
+## Возможности
 
-- Nominal FPS estimation using the median frame interval.
-- Manual FPS override, including fractional rates.
-- Warnings when average FPS differs significantly from the median-based estimate.
-- Dropped-frame interval reports with `HH:MM:SS:FF` timecodes.
-- Selective interpolation of empty output frame slots.
-- Optional interpolation at frame-assignment collisions.
-- Optional half-rate output without changing playback speed.
-- OpenCV DIS optical flow.
-- NVIDIA NVENC or CPU encoding.
-- HEVC and H.264 output.
-- Source-bitrate targeting or quality-based encoding.
-- Audio stream copy without intentional stretching or trimming.
-- Intermediate timestamp-offset correction.
-- Output video-start verification.
-- JSON analysis and processing reports.
+- Определение номинального FPS по медианному интервалу кадров.
+- Ручное указание FPS, включая дробные стандарты.
+- Предупреждения при расхождении среднего FPS и медианной оценки.
+- Отчёт о подозрительных интервалах с таймкодами `чч:мм:сс:кадр`.
+- Выборочная интерполяция пустых позиций.
+- Опциональная интерполяция конфликтных позиций.
+- Уменьшение выходного FPS вдвое без изменения скорости.
+- OpenCV DIS Optical Flow.
+- Кодирование NVIDIA NVENC или CPU.
+- Выход HEVC или H.264.
+- Целевой битрейт исходника либо режим качества.
+- Копирование аудио без намеренного растяжения и обрезки.
+- Компенсация сдвига промежуточного видеопотока.
+- Проверка начала выходного видео.
+- JSON-отчёт анализа и обработки.
 
-## Important limitations
+## Важные ограничения
 
-- **Interpolation runs on the CPU.** NVENC accelerates encoding only.
-- **RIFE is not included.**
-- Existing images are not normally interpolated, but all output frames undergo color conversion and re-encoding.
-- Duplicate images with regular timestamps are not detected.
-- Optical flow may produce ghosting or deformation, especially around occlusions, fast motion, and long gaps.
-- Exact arbitrary video duration cannot always be represented by a whole number of CFR frames. The video end is rounded up to a frame boundary.
-- Automatic validation checks the video start and, when available, the container's frame count. It does not fully validate every timestamp or audio sample.
-- Camera timecode/data streams, chapters, and general source metadata are not preserved by this version.
+- **Интерполяция работает на CPU.** NVENC ускоряет только кодирование.
+- **RIFE в этой версии отсутствует.**
+- Исходные изображения обычно не интерполируются, но все выходные кадры проходят преобразование цвета и перекодирование.
+- Дубли изображений с равномерными PTS не обнаруживаются.
+- Optical flow может создавать двоение и деформации на перекрытиях объектов, резком движении и длинных разрывах.
+- Произвольная длительность не всегда представима целым числом CFR-кадров. Конец видео округляется вверх до кадровой границы.
+- Автопроверка контролирует начало видео и доступный счётчик кадров, но не все временные метки и аудиосэмплы.
+- Камерный timecode, data-потоки, главы и общие метаданные исходника не переносятся.
 
-## Requirements
+## Требования
 
-- Python 3.10 or newer.
-- FFmpeg and FFprobe available in `PATH`.
-- Python dependencies from `requirements.txt`.
-- An NVIDIA GPU and compatible driver for NVENC encoding, or `--encoder cpu`.
+- Python 3.10 или новее.
+- FFmpeg и FFprobe в `PATH`.
+- Библиотеки из `requirements.txt`.
+- NVIDIA GPU с совместимым драйвером для NVENC либо `--encoder cpu`.
 
-The script targets progressive, square-pixel, 8-bit SDR video. HDR, interlaced video, non-square pixels, and rotation metadata are rejected by the current implementation.
+Поддерживается прогрессивное SDR-видео, 8 бит, с квадратными пикселями. HDR, чересстрочное видео, неквадратные пиксели и поворот через метаданные текущая реализация отклоняет.
 
-### Hardware usage
+### Использование оборудования
 
-| Operation | Hardware |
+| Операция | Оборудование |
 |---|---|
-| Timestamp analysis and decoding | CPU |
-| DIS optical flow | CPU |
-| Full-resolution warping and blending | CPU |
-| Encoding with `--encoder nvenc` | NVIDIA NVENC |
-| Encoding with `--encoder cpu` | CPU |
+| Анализ PTS и декодирование | CPU |
+| DIS Optical Flow | CPU |
+| Полноразмерная деформация и смешивание | CPU |
+| Кодирование `--encoder nvenc` | NVIDIA NVENC |
+| Кодирование `--encoder cpu` | CPU |
 
-Temporary encoded video is stored next to the output file. Allow enough disk space for both the temporary video and the final output.
+Временное закодированное видео создаётся рядом с выходным файлом. Нужно место одновременно под временный видеопоток и итоговый результат.
 
-## Installation
+## Установка
 
-Download or clone the repository, then install the Python dependencies:
+Скачай или клонируй репозиторий и установи зависимости:
 
 ```bash
 python -m pip install -r requirements.txt
 ```
 
-Install FFmpeg separately and verify that both commands are available:
+FFmpeg устанавливается отдельно. Проверка:
 
 ```bash
 ffmpeg -version
 ffprobe -version
 ```
 
-## Quick start
+## Быстрый старт
 
-### Analyze without creating a video
+### Только анализ
 
 ```bash
 python fix_drops.py input.mp4 fixed.mp4 --analyze-only
 ```
 
-This still writes a JSON report.
+Видео не создаётся, JSON-отчёт записывается.
 
-### Repair with automatic FPS detection
+### Исправление с автоопределением FPS
 
 ```bash
 python fix_drops.py input.mp4 fixed.mp4
 ```
 
-### Repair a known 60 FPS source
+### Известный исходник 60 FPS
 
 ```bash
 python fix_drops.py input.mp4 fixed.mp4 --source-fps 60
 ```
 
-### Also interpolate collision slots
+### Также интерполировать конфликтные позиции
 
 ```bash
 python fix_drops.py input.mp4 fixed.mp4 --source-fps 60 --collision-mode interpolate
 ```
 
-### Faster optical-flow settings
+### Быстрые настройки optical flow
 
 ```bash
 python fix_drops.py input.mp4 fixed.mp4 --source-fps 60 --flow-width 640 --flow-preset fast
 ```
 
-Quote paths containing spaces:
+Пути с пробелами заключаются в кавычки:
 
 ```bash
-python fix_drops.py "D:\Videos\source clip.mp4" "D:\Videos\fixed clip.mp4"
+python fix_drops.py "D:\Видео\исходный ролик.mp4" "D:\Видео\исправленный ролик.mp4"
 ```
 
-The output directory must already exist. Existing output video files are not overwritten.
+Каталог результата должен существовать. Готовое выходное видео не перезаписывается.
 
-## How it works
+## Принцип работы
 
-### 1. Analyze timestamps
+### 1. Анализ временных меток
 
-The script decodes the video and calculates adjacent frame intervals:
+Скрипт декодирует видео и рассчитывает интервалы:
 
 ```text
-interval = next PTS - previous PTS
-median FPS estimate = 1 / median interval
-average FPS = (frame count - 1) / (last PTS - first PTS)
+интервал = следующий PTS − предыдущий PTS
+
+FPS по медиане = 1 / медианный интервал
+
+средний FPS = (число кадров − 1) / (последний PTS − первый PTS)
 ```
 
-Average FPS is used for diagnostics, not directly as the output frame rate.
+Средний FPS используется для диагностики, а не напрямую как выходная частота.
 
-### 2. Select a nominal frame rate
+### 2. Выбор номинального FPS
 
-Automatic detection selects the standard rate closest to the median-based estimate:
+Автоопределение выбирает ближайший к медианной оценке стандарт:
 
 ```text
 24000/1001, 24, 25, 30000/1001, 30,
 50, 60000/1001, 60, 120000/1001, 120
 ```
 
-If the nearest rate differs from the estimate by more than 5%, the script requests a manual override.
+Если ближайший стандарт отличается от оценки более чем на 5%, скрипт просит указать FPS вручную.
 
-Nearby integer and fractional standards can be ambiguous. Use `--source-fps` when the recording standard is known.
+Целые и дробные стандарты могут быть неоднозначны. Если частота съёмки известна, используй `--source-fps`.
 
-This version does not use the camera's nominal-FPS metadata to resolve that ambiguity.
+В этой версии метаданные номинального FPS камеры не используются для разрешения неоднозначности.
 
-### 3. Report suspicious intervals
+### 3. Обнаружение подозрительных интервалов
 
-An interval is considered a suspected dropped-frame gap when:
-
-```text
-interval > 1.5 × median interval
-```
-
-The missing-frame count is estimated from the interval's ratio to the median.
-
-Large intervals are also reported according to `--long-gap-ms`.
-
-These are timestamp-based estimates, not proof that the camera physically lost specific frames.
-
-### 4. Build a CFR timeline
-
-Output presentation times are calculated from the first source video PTS:
+Интервал считается подозрительным на дроп, если:
 
 ```text
-target PTS = first source video PTS + output frame index / output FPS
+интервал > 1,5 × медианный интервал
 ```
 
-Source images are assigned sequentially to time bins around those target times:
+Число пропущенных кадров оценивается по отношению интервала к медианному.
 
-- An occupied slot normally uses the nearest source image.
-- An empty slot is interpolated from surrounding source frames.
-- A collision slot follows `--collision-mode`.
+Также отмечаются большие интервалы согласно `--long-gap-ms`.
 
-An empty CFR slot is not necessarily a physical camera drop. Clock drift relative to the selected frame grid can also create empty or crowded slots.
+Это оценка по временным меткам, а не доказательство физической потери конкретных кадров камерой.
 
-### 5. Interpolate selectively
+### 4. Построение CFR-сетки
 
-DIS optical flow is computed on reduced-resolution images. The original-resolution images are then warped and blended for the requested timestamp:
+Моменты показа рассчитываются от первого исходного видеокадра:
 
 ```text
-alpha = (target PTS - left PTS) / (right PTS - left PTS)
+целевой PTS = первый исходный PTS + номер выходного кадра / выходной FPS
 ```
 
-At a suspected scene cut, the script holds the left frame instead of blending two scenes.
+Исходные изображения последовательно распределяются по ячейкам вокруг этих моментов:
 
-### 6. Encode, correct timestamps, and mux
+- Занятая позиция обычно использует ближайшее исходное изображение.
+- Пустая позиция интерполируется между опорными кадрами.
+- Конфликтная позиция обрабатывается согласно `--collision-mode`.
 
-The script:
+Пустая позиция CFR-сетки не обязательно соответствует физическому дропу. Дрейф исходных PTS относительно выбранной сетки тоже может создавать пустые или переполненные ячейки.
 
-1. Encodes the generated video into a temporary file.
-2. Reads the first decoded video PTS from that file.
-3. Calculates the offset required to match the source video start.
-4. Muxes the corrected video with audio copied from the original input.
-5. Checks the first output video PTS.
+### 5. Выборочная интерполяция
 
-This avoids assuming that an encoded intermediate file always starts at zero.
-
-## Command-line options
+DIS Optical Flow рассчитывается на уменьшенных изображениях. Полноразмерные изображения деформируются и смешиваются для нужного момента:
 
 ```text
-python fix_drops.py INPUT OUTPUT [options]
+alpha = (целевой PTS − левый PTS) / (правый PTS − левый PTS)
 ```
 
-### Timeline and analysis
+На предполагаемой смене сцены удерживается левый кадр вместо смешивания двух сцен.
 
-| Option | Default | Description |
+### 6. Кодирование и сборка
+
+Скрипт:
+
+1. Кодирует видеоряд во временный файл.
+2. Читает PTS его первого декодированного кадра.
+3. Рассчитывает поправку к исходному началу видео.
+4. Собирает исправленное видео с аудио из исходника.
+5. Проверяет первый выходной PTS.
+
+Это устраняет ошибочное предположение, что промежуточный файл обязательно начинается с нуля.
+
+## Параметры
+
+```text
+python fix_drops.py INPUT OUTPUT [параметры]
+```
+
+### Временная ось и анализ
+
+| Параметр | По умолчанию | Назначение |
 |---|---|---|
-| `--source-fps` | `auto` | Nominal FPS or automatic estimation |
-| `--half-fps` | Off | Divide the nominal rate by two |
-| `--collision-mode` | `nearest` | `nearest` or `interpolate` |
-| `--warn-percent` | `5` | Warning threshold for average/median FPS disagreement |
-| `--long-gap-ms` | `100` | Large-interval warning threshold |
-| `--analyze-only` | Off | Analyze and write JSON without encoding |
+| `--source-fps` | `auto` | Номинальный FPS или автоопределение |
+| `--half-fps` | Выключен | Уменьшить номинальный FPS вдвое |
+| `--collision-mode` | `nearest` | `nearest` или `interpolate` |
+| `--warn-percent` | `5` | Порог расхождения оценок FPS |
+| `--long-gap-ms` | `100` | Порог большого интервала |
+| `--analyze-only` | Выключен | Только анализ и JSON |
 
-The FPS disagreement percentage is:
+Расхождение FPS:
 
 ```text
-abs(average FPS - median FPS estimate) / median FPS estimate × 100
+|средний FPS − FPS по медиане| / FPS по медиане × 100%
 ```
 
-`--long-gap-ms` only controls warnings and reporting. It does not disable interpolation across long gaps.
+`--long-gap-ms` влияет только на предупреждения и отчёт. Он не запрещает интерполяцию длинных разрывов.
 
-### Interpolation
+### Интерполяция
 
-| Option | Default | Description |
+| Параметр | По умолчанию | Назначение |
 |---|---|---|
-| `--flow-width` | `960` | Width used for optical-flow estimation |
-| `--flow-preset` | `medium` | `fast` or `medium` |
-| `--scene-threshold` | `0.65` | Histogram-based scene-cut threshold, from 0 to 1 |
+| `--flow-width` | `960` | Ширина для расчёта optical flow |
+| `--flow-preset` | `medium` | `fast` или `medium` |
+| `--scene-threshold` | `0.65` | Порог определения склейки по гистограммам, от 0 до 1 |
 
-Reducing `--flow-width` does not reduce output resolution.
+Уменьшение `--flow-width` не уменьшает разрешение результата.
 
-A lower scene threshold causes more pairs to be treated as scene cuts. The detector is approximate and can both miss cuts and reject valid motion.
+Чем ниже `--scene-threshold`, тем чаще пара считается сменой сцены. Детектор приблизительный: возможны пропущенные склейки и ложные срабатывания.
 
-### Encoding
+### Кодирование
 
-| Option | Default | Description |
+| Параметр | По умолчанию | Назначение |
 |---|---|---|
-| `--encoder` | `nvenc` | `nvenc` or `cpu` |
-| `--codec` | `hevc` | `hevc` or `h264` |
-| `--rate-control` | `source` | `source` bitrate target or `quality` mode |
-| `--bitrate-mbps` | Unset | Explicit target video bitrate |
-| `--cq` | `19` | NVENC CQ or CPU CRF in quality mode |
-| `--nvenc-preset` | `p4` | NVENC preset, `p1` through `p7` |
+| `--encoder` | `nvenc` | `nvenc` или `cpu` |
+| `--codec` | `hevc` | `hevc` или `h264` |
+| `--rate-control` | `source` | Целевой битрейт исходника или `quality` |
+| `--bitrate-mbps` | Не задан | Ручной целевой видеобитрейт |
+| `--cq` | `19` | NVENC CQ или CPU CRF в режиме качества |
+| `--nvenc-preset` | `p4` | Пресет NVENC от `p1` до `p7` |
 
-`--bitrate-mbps` overrides `--rate-control`.
+`--bitrate-mbps` имеет приоритет над `--rate-control`.
 
-In source-bitrate mode, the script reads the video stream bitrate from metadata. If unavailable, specify a bitrate manually or use quality mode.
+В режиме `source` видеобитрейт берётся из метаданных видеопотока. Если его нет, нужно задать значение вручную или использовать режим качества.
 
-The bitrate is a VBR target, not a guarantee of an identical file size or measured average bitrate.
+Битрейт является целью VBR, а не гарантией одинакового размера файла или фактического среднего битрейта.
 
-`--cq` is ignored when a bitrate target is used. Lower CQ/CRF values generally increase quality and file size, but values are not directly comparable across encoders.
+`--cq` не применяется при заданном целевом битрейте. Меньшие CQ/CRF обычно повышают качество и размер файла, но значения разных кодировщиков напрямую не сопоставимы.
 
-## Collision modes
+## Обработка конфликтов
 
 ### `nearest`
 
-Selects the source image closest to the output timestamp.
+Выбирает исходное изображение, ближайшее к целевому моменту.
 
-This minimizes synthesis but can leave a small local motion irregularity when source images must be discarded.
+Минимизирует синтез, но при отбрасывании лишних кадров иногда остаётся небольшая локальная неравномерность движения.
 
 ### `interpolate`
 
-Synthesizes an image at the target timestamp for collision slots.
+Создаёт изображение для точного момента конфликтной позиции.
 
-It replaces the image in an existing slot; it does not add another output frame or extend the timeline.
+При этом заменяется изображение в существующей позиции. Дополнительный кадр в таймлайн не вставляется, длительность не увеличивается.
 
-With `--half-fps`, two source frames in a bin are treated as normal downsampling. A collision is reported when there are more than two.
+При `--half-fps` два исходных кадра в ячейке считаются нормальным прореживанием. Конфликт фиксируется, если их больше двух.
 
-## Examples
+## Примеры
 
-### Fractional 59.94 FPS
+### Дробные 59,94 FPS
 
 ```bash
 python fix_drops.py input.mp4 fixed.mp4 --source-fps 60000/1001
 ```
 
-### 60 to 30 FPS without changing playback speed
+### 60 → 30 FPS без изменения скорости
 
 ```bash
 python fix_drops.py input.mp4 fixed.mp4 --source-fps 60 --half-fps
 ```
 
-### Explicit 76 Mbps target
+### Целевой битрейт 76 Мбит/с
 
 ```bash
 python fix_drops.py input.mp4 fixed.mp4 --bitrate-mbps 76
 ```
 
-### Quality-based encoding
+### Режим качества
 
 ```bash
 python fix_drops.py input.mp4 fixed.mp4 --rate-control quality --cq 18
 ```
 
-### H.264 output
+### Выход H.264
 
 ```bash
 python fix_drops.py input.mp4 fixed.mp4 --codec h264
 ```
 
-### CPU encoding
+### Кодирование на CPU
 
 ```bash
 python fix_drops.py input.mp4 fixed.mp4 --encoder cpu --rate-control quality --cq 18
 ```
 
-### More detailed optical flow
+### Более подробный расчёт движения
 
 ```bash
 python fix_drops.py input.mp4 fixed.mp4 --flow-width 1280 --flow-preset medium --collision-mode interpolate
 ```
 
-## Timing and duration
+## Синхронизация и длительность
 
-The script does not deliberately retime the video by assigning consecutive restored frame numbers while ignoring source PTS. Output positions remain anchored to the source timeline.
+Скрипт не назначает восстановленным кадрам новые последовательные номера с игнорированием исходных PTS. Выходные моменты остаются привязанными к исходной временной оси.
 
-Individual source images may nevertheless be shown slightly earlier or later because of CFR quantization.
+Время показа отдельных исходных изображений может немного округляться к CFR-сетке.
 
-The video duration is rounded up:
-
-```text
-output frame count = ceil(source video duration × output FPS)
-output duration = output frame count / output FPS
-```
-
-For example:
+Конец видео округляется вверх:
 
 ```text
-Source video duration: 4.410389 s
-Output rate:          60 FPS
-Output frame count:   265
-Output duration:      4.416667 s
+число выходных кадров = ceil(длительность исходного видео × выходной FPS)
+
+выходная длительность = число выходных кадров / выходной FPS
 ```
 
-Audio is not trimmed to match this rounded video end.
+Пример:
 
-Complex container edit lists and application-specific playback behavior are not exhaustively handled. The script also does not correct clock drift already present between independently recorded cameras.
+```text
+Исходная длительность видео: 4,410389 с
+Выходная частота:            60 FPS
+Выходных кадров:             265
+Выходная длительность:       4,416667 с
+```
 
-### Output validation
+Аудио не обрезается под этот округлённый конец.
 
-After muxing, the first output video PTS is compared with the source start.
+Сложные edit list и особенности воспроизведения контейнера разными программами не обрабатываются исчерпывающе. Уже существующий дрейф часов между независимыми камерами скрипт также не исправляет.
 
-The tolerance is the greater of:
+### Проверка результата
 
-- 1.1 milliseconds;
-- two units of the output video time base.
+После сборки начало выходного видео сравнивается с исходным.
 
-If the container reports a frame count, it is also checked.
+Допуск — большее из двух значений:
 
-A failed check sets:
+- 1,1 мс;
+- две единицы временной базы выходного видео.
+
+Если контейнер сообщает число кадров, оно тоже проверяется.
+
+При ошибке в отчёте появляется:
 
 ```json
 "timing_check": "FAILED"
 ```
 
-The output file may still exist after failure. Do not treat it as validated.
+Файл после ошибки может существовать. Это не означает, что он прошёл проверку.
 
-## Reports and timecodes
+## Отчёт и таймкоды
 
-For `fixed.mp4`, the report is:
+Для `fixed.mp4` создаётся:
 
 ```text
 fixed.mp4.drops.json
 ```
 
-It contains:
+Отчёт содержит:
 
-- Input and output FPS information.
-- Median and average timing statistics.
-- Warnings and suspicious intervals.
-- Estimated missing-frame counts.
-- Planned output duration and frame count.
-- Intermediate timestamp compensation.
-- Output-start verification results.
-- Processing counters.
+- Исходный, оценённый и выходной FPS.
+- Медианные и средние характеристики времени.
+- Предупреждения и подозрительные интервалы.
+- Оценки числа пропущенных кадров.
+- Плановую длительность и число выходных кадров.
+- Поправку временных меток промежуточного видео.
+- Результат проверки начала.
+- Счётчики обработки.
 
-Processing counters include:
+### Счётчики обработки
 
-| Field | Meaning |
+| Поле | Значение |
 |---|---|
-| `original` | Output frames using a selected source image |
-| `interpolated` | Synthesized frames |
-| `edge_hold` | Holds where a second reference is unavailable |
-| `scene_hold` | Holds at suspected scene cuts |
-| `empty_slots` | Empty output-grid bins |
-| `collision_slots` | Crowded bins requiring collision handling |
+| `original` | Кадры с выбранным исходным изображением |
+| `interpolated` | Синтезированные кадры |
+| `edge_hold` | Удержания без второй опоры |
+| `scene_hold` | Удержания на предполагаемых склейках |
+| `empty_slots` | Пустые ячейки выходной сетки |
+| `collision_slots` | Конфликтные ячейки |
 
-Reports use relative **non-drop-frame (NDF)** timecodes:
+Таймкоды — относительные **Non-Drop-Frame, NDF**:
 
 ```text
-HH:MM:SS:FF
+чч:мм:сс:кадр
 ```
 
-Timecodes start at the first source video frame and use the nominal source rate, even with `--half-fps`.
+Отсчёт начинается от первого видеокадра и использует номинальный исходный FPS, в том числе при `--half-fps`.
 
-They are not embedded camera timecodes. At fractional rates, NDF timecode does not remain identical to wall-clock time.
+Это не камерный timecode. На дробных частотах NDF-таймкод не совпадает на длинной дистанции с обычным секундомером.
 
-The report file may be overwritten by another run using the same output name.
+Отчёт может быть перезаписан повторным запуском с тем же выходным именем.
 
-## Audio verification
+## Проверка звука
 
-Audio is copied without re-encoding, but this version does not automatically compare decoded audio samples.
+Аудио копируется без перекодирования, но автоматического сравнения декодированных сэмплов в этой версии нет.
 
-To compare the first audio stream manually:
+Ручная проверка первой аудиодорожки:
 
 ```bash
 ffmpeg -v error -i input.mp4 -map 0:a:0 -vn -c:a pcm_s32le -f hash -hash sha256 -
@@ -415,83 +418,83 @@ ffmpeg -v error -i input.mp4 -map 0:a:0 -vn -c:a pcm_s32le -f hash -hash sha256 
 ffmpeg -v error -i fixed.mp4 -map 0:a:0 -vn -c:a pcm_s32le -f hash -hash sha256 -
 ```
 
-Matching hashes indicate matching decoded sample sequences in this comparison.
+Совпадающие хеши означают одинаковую последовательность декодированных сэмплов в этом сравнении.
 
-**Audio hashes do not verify audio placement relative to video.** Check timestamps and playback synchronization separately.
+**Хеш звука не проверяет положение аудио относительно видео.** Временные метки и синхрон воспроизведения проверяются отдельно.
 
 ## DaVinci Resolve
 
-- Import the result as a new clip, preferably with a new filename.
-- Verify that Resolve detects the expected FPS.
-- Use a matching timeline rate for frame-by-frame validation.
-- Check the beginning, end, and several repaired gaps.
-- Do not reinterpret a 60 FPS clip as 24 or 30 FPS in Clip Attributes unless a playback-speed change is intended.
-- Different waveform rendering alone does not prove different audio samples. Check clip placement, processing, and waveform caching.
+- Импортируй результат как новый клип, желательно под новым именем.
+- Проверь определённый FPS.
+- Для покадровой проверки используй таймлайн той же частоты.
+- Проверь начало, конец и несколько восстановленных разрывов.
+- Не переопределяй 60-FPS-клип как 24 или 30 FPS в Clip Attributes, если не требуется изменение скорости.
+- Другая форма волны сама по себе не доказывает изменение сэмплов. Проверь положение клипа, обработку звука и кэш волны.
 
-## Troubleshooting
+## Устранение проблем
 
-### Input file not found
+### Входной файл не найден
 
-Use the actual filename or an absolute path. The script does not search other directories automatically.
+Укажи настоящее имя или полный путь. Скрипт автоматически не ищет файл в других каталогах.
 
-### Output file already exists
+### Выходной файл уже существует
 
-Choose another output name or remove the previous result.
+Выбери другое имя или удали предыдущий результат.
 
-### NVENC failure
+### Ошибка NVENC
 
-Check the NVIDIA driver and FFmpeg build, or try:
+Проверь драйвер NVIDIA и сборку FFmpeg либо используй:
 
 ```text
 --encoder cpu
 ```
 
-### Source bitrate is missing
+### В метаданных нет битрейта
 
-Use:
+Укажи:
 
 ```text
 --bitrate-mbps 50
 ```
 
-or:
+или:
 
 ```text
 --rate-control quality --cq 19
 ```
 
-### Audio codec is incompatible with MP4
+### Аудиокодек несовместим с MP4
 
-Try an MKV output. Verify compatibility with your editor separately.
+Попробуй выход MKV. Совместимость с монтажной программой проверь отдельно.
 
-### Processing is slow
+### Медленная обработка
 
-Try:
+Попробуй:
 
 ```text
 --flow-width 640 --flow-preset fast
 ```
 
-Optical flow, image warping, decoding, and color conversion still use the CPU. Smaller flow images do not proportionally accelerate the entire pipeline.
+Optical flow, деформация, декодирование и преобразование цвета всё ещё работают на CPU. Уменьшение размера для потока не ускоряет весь процесс пропорционально.
 
-### Timing validation failed
+### Проверка времени не пройдена
 
-Keep the console output and JSON report. Do not use the result for timing-critical work until the discrepancy is understood.
+Сохрани консольный вывод и JSON-отчёт. Не используй результат для ответственной синхронизации, пока причина не установлена.
 
-## Reporting issues
+## Сообщения об ошибках
 
-Include:
+При создании Issue приложи:
 
-- The command used.
-- OS, Python, FFmpeg, and dependency versions.
-- Input codec, resolution, and expected FPS.
-- Console output and JSON report.
-- A short reproducible sample, if you have permission to share it.
+- Использованную команду.
+- ОС, версии Python, FFmpeg и зависимостей.
+- Кодек, разрешение и ожидаемый FPS исходника.
+- Консольный вывод и JSON-отчёт.
+- Короткий воспроизводимый пример, если имеешь право его публиковать.
 
-Review reports before publishing them: they contain file paths and filenames.
+Перед публикацией проверь отчёт: он содержит пути и имена файлов.
 
-## License
+## Лицензия
 
-The project code is licensed under the [MIT License](LICENSE).
+Код проекта распространяется по [лицензии MIT](LICENSE).
 
-FFmpeg, PyAV, OpenCV, NumPy, and other dependencies are distributed under their respective licenses. This project's license does not replace their license terms.
+FFmpeg, PyAV, OpenCV, NumPy и другие зависимости распространяются по собственным лицензиям. Лицензия этого проекта не заменяет их условия.
